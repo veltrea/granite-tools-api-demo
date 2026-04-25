@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>[TOOL_CALLS] Protocol Demo</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-user-select: text; user-select: text; }
+:root { --bg: #1e1e1e; --panel: #252526; --border: #3c3c3c; --text: #ccc; --dim: #888; --green: #4ec9b0; --blue: #569cd6; --yellow: #dcdcaa; --red: #f44747; --mono: 'Cascadia Code','Fira Code','SF Mono',Consolas,monospace; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+.header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 10px 16px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; }
+.header .row { display: flex; align-items: center; gap: 8px; font-size: 12px; font-family: var(--mono); color: var(--dim); }
+.header .val { color: var(--text); }
+.header button { font-size: 11px; padding: 4px 10px; background: #333; border: 1px solid #555; color: #ccc; border-radius: 4px; cursor: pointer; }
+.header button:hover { background: #444; }
+.header .status { font-size: 11px; font-family: var(--mono); color: var(--green); margin-left: auto; }
+.header .path-guard { font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 3px; margin-left: auto; transition: all 0.3s; }
+.header .path-guard.locked { color: var(--green); background: rgba(78, 201, 176, 0.1); border: 1px solid rgba(78, 201, 176, 0.3); }
+.header .path-guard.unlocked { color: var(--red); background: rgba(244, 71, 71, 0.15); border: 1px solid rgba(244, 71, 71, 0.4); }
+
+.messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.msg { max-width: 85%; padding: 10px 14px; border-radius: 8px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.msg.user { align-self: flex-end; background: #264f78; border-radius: 8px 8px 2px 8px; }
+.msg.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); border-radius: 8px 8px 8px 2px; font-size: 13px; }
+.msg.assistant.streaming { white-space: pre-wrap; font-family: var(--mono); }
+.msg.assistant.rendered { white-space: normal; }
+.msg.assistant.rendered p { margin: 0.4em 0; }
+.msg.assistant.rendered pre { background: #1a1a1a; border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; overflow-x: auto; margin: 0.5em 0; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+.msg.assistant.rendered code { font-family: var(--mono); font-size: 12px; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; }
+.msg.assistant.rendered pre code { background: none; padding: 0; }
+.msg.assistant.rendered ul, .msg.assistant.rendered ol { margin: 0.4em 0 0.4em 1.5em; }
+.msg.assistant.rendered blockquote { border-left: 3px solid var(--dim); padding-left: 10px; color: var(--dim); margin: 0.4em 0; }
+.msg.assistant.rendered h1, .msg.assistant.rendered h2, .msg.assistant.rendered h3 { margin: 0.6em 0 0.3em; color: var(--blue); font-size: 14px; }
+.msg.assistant.rendered table { border-collapse: collapse; margin: 0.4em 0; font-size: 12px; }
+.msg.assistant.rendered th, .msg.assistant.rendered td { border: 1px solid var(--border); padding: 3px 8px; }
+.msg.assistant.rendered a { color: var(--blue); }
+.msg .meta { font-size: 10px; color: var(--dim); margin-top: 6px; border-top: 1px solid var(--border); padding-top: 4px; font-family: var(--mono); }
+.msg.system { align-self: center; background: transparent; color: var(--dim); font-size: 12px; padding: 4px; }
+.msg.error { align-self: stretch; background: #3a1a1a; color: var(--red); font-size: 12px; border: 1px solid #5a2a2a; border-radius: 4px; }
+.msg.tool-call { align-self: stretch; background: #1a2a1a; border: 1px solid #2a4a2a; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
+.msg.tool-call .tool-header { color: var(--green); font-weight: bold; cursor: pointer; }
+.msg.tool-call .tool-header::before { content: '▶ '; font-size: 10px; }
+.msg.tool-call.expanded .tool-header::before { content: '▼ '; }
+.msg.tool-call .tool-body { display: none; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a4a2a; color: var(--text); max-height: 300px; overflow-y: auto; }
+.msg.tool-call.expanded .tool-body { display: block; }
+.msg.tool-result { align-self: stretch; background: #1a1a2a; border: 1px solid #2a2a4a; border-radius: 4px; font-family: var(--mono); font-size: 11px; color: var(--dim); max-height: 200px; overflow-y: auto; }
+.msg.tool-exec { align-self: center; color: var(--yellow); font-size: 11px; font-family: var(--mono); padding: 2px; }
+
+.input-bar { background: var(--panel); border-top: 1px solid var(--border); padding: 10px 16px; display: flex; gap: 8px; flex-shrink: 0; }
+.input-bar textarea { flex: 1; background: #1a1a1a; border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 14px; font-family: inherit; resize: none; min-height: 38px; max-height: 120px; line-height: 1.4; }
+.input-bar textarea:focus { outline: none; border-color: var(--blue); }
+.input-bar button { background: #0e639c; color: #fff; border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.input-bar button:hover { background: #1177bb; }
+.input-bar button:disabled { background: #3c3c3c; color: #666; cursor: default; }
+.input-bar button.stop { background: #a33; }
+.input-bar button.stop:hover { background: #c44; }
+</style>
+<!-- marked.js v15.0.7 (MIT License) - https://github.com/markedjs/marked -->
+<script>{{MARKED_JS}}</script>
+</head>
+<body>
+<script>
+document.addEventListener('keydown', function(e) {
+  var tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+}, true);
+</script>
+<div class="header">
+  <div class="row">
+    endpoint: <span class="val">{{ENDPOINT}}</span>
+    &nbsp;|&nbsp; model: <span class="val">{{MODEL}}</span>
+    <button onclick="clearChat()">Clear</button>
+    <span class="status" id="status">Ready</span>
+  </div>
+  <div class="row">
+    workdir: <span class="val">{{WORKDIR}}</span>
+    <span class="path-guard" id="pathGuard" title="Workspace path guard: files outside workdir are blocked">🔒 workspace only</span>
+  </div>
+</div>
+<div class="messages" id="messages"></div>
+<div class="input-bar">
+  <textarea id="input" rows="1" placeholder="Enter で送信 / Shift+Enter で改行"></textarea>
+  <button id="sendBtn" onclick="send()">Send</button>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const $msgs=$('messages'),$input=$('input'),$status=$('status'),$sendBtn=$('sendBtn'),$pathGuard=$('pathGuard');
+
+// config.json から注入された固定値
+const ENDPOINT = '{{ENDPOINT}}';
+const MODEL = '{{MODEL}}';
+
+let history=[],generating=false,abortCtrl=null;
+
+// パスガード状態の表示
+let pathGuardLocked = true;
+function updatePathGuard(locked) {
+  pathGuardLocked = locked;
+  if (locked) {
+    $pathGuard.textContent = '🔒 workspace only';
+    $pathGuard.title = 'Path guard ON: files outside workdir are blocked';
+    $pathGuard.className = 'path-guard locked';
+  } else {
+    $pathGuard.textContent = '⚠ unrestricted';
+    $pathGuard.title = 'Path guard OFF: absolute paths and paths outside workdir are allowed';
+    $pathGuard.className = 'path-guard unlocked';
+  }
+}
+updatePathGuard(true);
+
+// プロンプトは prompts/ ディレクトリの外部ファイルから Rust 側が注入する
+const TOOL_SYSTEM_PROMPT = `{{SYSTEM_PROMPT}}
+
+## Tools
+
+{{TOOLS_PROMPT}}`;
+
+const MAX_TOOL_LOOPS = 10;
+
+// marked.js 設定
+if (typeof marked !== 'undefined') {
+  marked.setOptions({ breaks: true, gfm: true });
+}
+
+// マークダウンを安全に HTML に変換（XSS 対策: script タグ等を除去）
+function renderMarkdown(text) {
+  if (typeof marked === 'undefined') return escapeHtml(text);
+  try {
+    return marked.parse(text);
+  } catch { return escapeHtml(text); }
+}
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+$input.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send();}
+});
+$input.addEventListener('input',()=>{
+  $input.style.height='auto';
+  $input.style.height=Math.min($input.scrollHeight,120)+'px';
+});
+
+function addMsg(role,text){
+  const d=document.createElement('div');
+  d.className='msg '+role;
+  if (role === 'assistant') {
+    // ストリーミング中はプレーンテキスト、完了後に renderMarkdown で差し替える
+    d.classList.add('streaming');
+    d.textContent=text||'';
+  } else {
+    d.textContent=text||'';
+  }
+  $msgs.appendChild(d);
+  $msgs.scrollTop=$msgs.scrollHeight;
+  return d;
+}
+
+// アシスタントメッセージをマークダウンレンダリングに切り替える
+function renderAssistantMsg(div, text) {
+  div.classList.remove('streaming');
+  div.classList.add('rendered');
+  // meta 要素があれば保持
+  const metaEl = div.querySelector('.meta');
+  div.innerHTML = renderMarkdown(text);
+  if (metaEl) div.appendChild(metaEl);
+  $msgs.scrollTop = $msgs.scrollHeight;
+}
+function setStatus(t,c){$status.textContent=t;$status.style.color=c||'var(--green)';}
+
+function addToolCallMsg(toolName, args) {
+  const d = document.createElement('div');
+  d.className = 'msg tool-call';
+  const header = document.createElement('div');
+  header.className = 'tool-header';
+  header.textContent = toolName + ': ' + JSON.stringify(args);
+  header.onclick = () => d.classList.toggle('expanded');
+  const body = document.createElement('div');
+  body.className = 'tool-body';
+  body.textContent = JSON.stringify(args, null, 2);
+  d.appendChild(header);
+  d.appendChild(body);
+  $msgs.appendChild(d);
+  $msgs.scrollTop = $msgs.scrollHeight;
+}
+
+function addToolResultMsg(result) {
+  const d = document.createElement('div');
+  d.className = 'msg tool-result';
+  d.textContent = result.length > 2000 ? result.substring(0, 2000) + '\n... (truncated)' : result;
+  $msgs.appendChild(d);
+  $msgs.scrollTop = $msgs.scrollHeight;
+}
+
+// --- [TOOL_CALLS] パーサー (統合版) ---
+// 位置情報付きでパースし、parseToolCalls / stripToolCalls / ストリーミング表示の全てで使う。
+
+// ブレースマッチングで JSON オブジェクトの終端位置を返す (見つからなければ -1)
+function findJsonEnd(str) {
+  let depth = 0, inStr = false, esc = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return i + 1; }
+  }
+  return -1; // JSON が閉じていない（ストリーミング途中）
+}
+
+// テキスト中の [TOOL_CALLS] ブロックを全て検出。
+// 各要素: { name, arguments, blockStart, blockEnd }
+// incomplete: true → 最後のブロックがまだ閉じていない（ストリーミング途中）
+function parseToolCallsWithRanges(text) {
+  const results = [];
+  const re = /\[TOOL_CALLS\]\s*(\w+)\s*:?\s*/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const toolName = m[1];
+    const afterMatch = m.index + m[0].length;
+    const rest = text.substring(afterMatch);
+    const jsonStart = rest.indexOf('{');
+
+    if (jsonStart === -1) {
+      // JSON が始まっていない — ストリーミング途中の可能性大
+      results.push({ name: toolName, arguments: {}, blockStart: m.index, blockEnd: -1, incomplete: true });
+      continue;
+    }
+
+    const jsonStr = rest.substring(jsonStart);
+    const jsonEnd = findJsonEnd(jsonStr);
+
+    if (jsonEnd === -1) {
+      // JSON が閉じていない — ストリーミング途中
+      results.push({ name: toolName, arguments: {}, blockStart: m.index, blockEnd: -1, incomplete: true });
+      continue;
+    }
+
+    let args = {};
+    try { args = JSON.parse(jsonStr.substring(0, jsonEnd)); } catch {}
+
+    let blockEnd = afterMatch + jsonStart + jsonEnd;
+    // 閉じタグ [/TOOL_CALLS] があれば含める
+    const afterJson = text.substring(blockEnd);
+    const closeMatch = afterJson.match(/^\s*\[\/TOOL_CALLS\]/);
+    if (closeMatch) blockEnd += closeMatch[0].length;
+
+    results.push({ name: toolName, arguments: args, blockStart: m.index, blockEnd, incomplete: false });
+  }
+  return results;
+}
+
+// 完了済みのツール呼び出しだけ返す（ストリーミング完了後に使う）
+function parseToolCalls(text) {
+  return parseToolCallsWithRanges(text)
+    .filter(tc => !tc.incomplete)
+    .map(tc => ({ name: tc.name, arguments: tc.arguments }));
+}
+
+// ツール呼び出しブロックを除去した表示用テキストを返す
+function stripToolCalls(text) {
+  const ranges = parseToolCallsWithRanges(text)
+    .filter(tc => !tc.incomplete && tc.blockEnd > 0)
+    .map(tc => [tc.blockStart, tc.blockEnd]);
+  let result = text;
+  for (let i = ranges.length - 1; i >= 0; i--) {
+    result = result.substring(0, ranges[i][0]) + result.substring(ranges[i][1]);
+  }
+  return result.trim();
+}
+
+// ストリーミング中の表示用: [TOOL_CALLS] の開始位置以降を隠す
+// 返り値: ユーザーに見せるべきテキスト（タグ以前の部分のみ）
+function getDisplayTextDuringStream(text) {
+  const idx = text.indexOf('[TOOL_CALLS]');
+  if (idx === -1) return text;
+  // タグより前のテキストだけ返す
+  return text.substring(0, idx).trimEnd();
+}
+
+async function executeTool(toolName, args) {
+  console.log('[tool] executing:', toolName, JSON.stringify(args));
+  try {
+    const res = await fetch('app://localhost/tool', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool: toolName, args: args })
+    });
+    const text = await res.text();
+    console.log('[tool] result:', text.substring(0, 200));
+    return text;
+  } catch (e) {
+    console.error('[tool] fetch failed:', e);
+    return 'ERROR: Tool execution failed: ' + e.message;
+  }
+}
+
+function clearChat(){
+  history=[];
+  $msgs.innerHTML='';
+  setStatus('Ready','var(--dim)');
+}
+
+async function streamChat() {
+  const msgs = [{ role: 'system', content: TOOL_SYSTEM_PROMPT }];
+  for (const m of history) msgs.push({ role: m.role, content: m.content });
+
+  const msgDiv = addMsg('assistant', '');
+  let fullText = '', tokenCount = 0, firstTokenAt = null;
+  const startTime = Date.now();
+  abortCtrl = new AbortController();
+
+  const res = await fetch(ENDPOINT + '/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: MODEL, messages: msgs, max_tokens: 2048, stream: true }),
+    signal: abortCtrl.signal
+  });
+  if (!res.ok) throw new Error(res.status + ': ' + await res.text());
+
+  let toolDetected = false;
+  const reader = res.body.getReader(), decoder = new TextDecoder();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    for (const line of decoder.decode(value, { stream: true }).split('\n')) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') continue;
+      try {
+        const c = JSON.parse(data).choices?.[0]?.delta?.content;
+        if (c) {
+          if (!firstTokenAt) firstTokenAt = Date.now();
+          tokenCount++; fullText += c;
+          // [TOOL_CALLS] が現れたらタグ以前のテキストだけ表示し、
+          // ツール呼び出し部分はプレースホルダーに差し替える
+          const displayText = getDisplayTextDuringStream(fullText);
+          if (fullText.includes('[TOOL_CALLS]')) {
+            if (!toolDetected) { toolDetected = true; setStatus('Tool call detected...', 'var(--yellow)'); }
+            msgDiv.textContent = displayText ? displayText + '\n\n🔧 Calling tool...' : '🔧 Calling tool...';
+          } else {
+            msgDiv.textContent = fullText;
+          }
+          $msgs.scrollTop = $msgs.scrollHeight;
+        }
+      } catch {}
+    }
+  }
+
+  const elapsed = Date.now() - startTime;
+  const latency = firstTokenAt ? firstTokenAt - startTime : 0;
+  const genSec = firstTokenAt ? (Date.now() - firstTokenAt) / 1000 : 0;
+  const tps = genSec > 0 ? (tokenCount / genSec).toFixed(1) : '-';
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = tokenCount + ' tok | ' + tps + ' t/s | TTFT ' + latency + 'ms';
+  msgDiv.appendChild(meta);
+  setStatus(tps + ' t/s', 'var(--green)');
+
+  return { fullText, msgDiv };
+}
+
+async function send(){
+  if (generating) { if (abortCtrl) abortCtrl.abort(); return; }
+  const text = $input.value.trim();
+  if (!text) return;
+  $input.value = ''; $input.style.height = 'auto';
+  addMsg('user', text);
+  history.push({ role: 'user', content: text });
+
+  generating = true;
+  $sendBtn.textContent = 'Stop'; $sendBtn.className = 'stop';
+  setStatus('Generating...', 'var(--yellow)');
+
+  try {
+    let loopCount = 0;
+    while (loopCount < MAX_TOOL_LOOPS) {
+      const { fullText, msgDiv } = await streamChat();
+      history.push({ role: 'assistant', content: fullText });
+
+      const toolCalls = parseToolCalls(fullText);
+      if (toolCalls.length === 0) {
+        // ツール呼び出しなし = 最終応答 → マークダウンレンダリング
+        renderAssistantMsg(msgDiv, fullText);
+        break;
+      }
+
+      // ツール呼び出しあり → ツール部分を除去して残りをレンダリング
+      const cleanText = stripToolCalls(fullText);
+      if (cleanText) {
+        renderAssistantMsg(msgDiv, cleanText);
+      } else {
+        // テキストが空（ツール呼び出しのみ）なら吹き出しごと消す
+        msgDiv.remove();
+      }
+
+      let toolResults = [];
+      for (const tc of toolCalls) {
+        addToolCallMsg(tc.name, tc.arguments);
+        setStatus('Executing ' + tc.name + '...', 'var(--yellow)');
+        const result = await executeTool(tc.name, tc.arguments);
+        addToolResultMsg(result);
+        toolResults.push('[TOOL_RESULT name="' + tc.name + '"]\n' + result + '\n[/TOOL_RESULT]');
+
+        // パスガードの状態変更を検出
+        if (tc.name === 'allow_outside_workspace') {
+          if (result.includes('enabled')) updatePathGuard(false);
+          else if (result.includes('restricted')) updatePathGuard(true);
+        }
+      }
+
+      history.push({ role: 'user', content: toolResults.join('\n') });
+      setStatus('Tool result → LLM...', 'var(--yellow)');
+      loopCount++;
+    }
+    if (loopCount >= MAX_TOOL_LOOPS) addMsg('system', 'Tool loop limit reached (' + MAX_TOOL_LOOPS + ')');
+  } catch(e) {
+    if (e.name === 'AbortError') setStatus('Stopped', 'var(--yellow)');
+    else { addMsg('error', e.message); setStatus('Error', 'var(--red)'); }
+  }
+
+  generating = false; abortCtrl = null;
+  $sendBtn.textContent = 'Send'; $sendBtn.className = '';
+  $input.focus();
+}
+
+// --- テスト API (Rust 側の evaluate_script から呼ばれる) ---
+
+// メッセージを送信
+function __testSend(text) {
+  if (generating) return;
+  $input.value = text;
+  send();
+}
+
+// 現在の状態を IPC 経由で Rust に送る
+function __testReportState() {
+  if (window.ipc) {
+    window.ipc.postMessage(JSON.stringify({
+      history: history,
+      generating: generating,
+      messageCount: $msgs.children.length
+    }));
+  }
+}
+</script>
+</body>
+</html>
