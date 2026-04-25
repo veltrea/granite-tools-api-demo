@@ -1118,7 +1118,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "granite-native-protocol-demo"
+name = "granite-tools-api-demo"
 version = "0.1.0"
 dependencies = [
  "glob",

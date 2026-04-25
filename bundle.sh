@@ -8,8 +8,8 @@ cargo build --release
 
 APP="ChatClient.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/granite-native-protocol-demo "$APP/Contents/MacOS/granite-native-protocol-demo"
-chmod +x "$APP/Contents/MacOS/granite-native-protocol-demo"
+cp target/release/granite-tools-api-demo "$APP/Contents/MacOS/granite-tools-api-demo"
+chmod +x "$APP/Contents/MacOS/granite-tools-api-demo"
 
 echo "Done: $APP ($(du -sh "$APP" | cut -f1))"
 echo "  open ChatClient.app"

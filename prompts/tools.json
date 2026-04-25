@@ -1,0 +1,232 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "open",
+      "description": "Read a file and display it in a scrollable editor window (100 lines at a time). Output format: line numbers (`N | content`), total line count, and visible range. You MUST open a file before you can edit, insert, scroll, or search within it.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative path from workspace root."
+          },
+          "line_number": {
+            "type": "integer",
+            "description": "Center the view on this line."
+          }
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "goto",
+      "description": "Move the editor window to show the specified line number. A file must already be open.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "line_number": {
+            "type": "integer",
+            "description": "The 1-based line number to jump to."
+          }
+        },
+        "required": ["line_number"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "scroll_up",
+      "description": "Scroll the editor window up by one page (100 lines). A file must already be open.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "scroll_down",
+      "description": "Scroll the editor window down by one page (100 lines). A file must already be open.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create",
+      "description": "Create a new empty file and open it in the editor. Parent directories are created automatically.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "Relative path for the new file."
+          }
+        },
+        "required": ["filename"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "edit",
+      "description": "Replace text in the currently open file. You MUST open the file first. Replaces the first occurrence of `search` with `replace`. Set `replace-all` to true for all occurrences. The `search` string must exactly match existing content (including whitespace and indentation). Returns an error if `search` is not found — double-check with `open` or `search_file` first.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "The exact text to find in the current file."
+          },
+          "replace": {
+            "type": "string",
+            "description": "The replacement text."
+          },
+          "replace-all": {
+            "type": "boolean",
+            "description": "Replace all occurrences instead of just the first. Default: false."
+          }
+        },
+        "required": ["search", "replace"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "insert",
+      "description": "Insert text into the currently open file. Appends at the end by default, or after the specified line.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The text to insert (can be multiple lines with \\n)."
+          },
+          "line": {
+            "type": "integer",
+            "description": "Insert after this line number (1-based). Omit to append at end."
+          }
+        },
+        "required": ["text"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "find_file",
+      "description": "Search for files by name pattern using glob syntax (*, ?). Returns up to 50 matching file paths.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "description": "Glob pattern to match against file names (e.g., \"*.rs\", \"config.*\")."
+          },
+          "dir": {
+            "type": "string",
+            "description": "Subdirectory to search in. Default: workspace root."
+          }
+        },
+        "required": ["file_name"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_dir",
+      "description": "Search for a text string across all files in a directory. Returns matching lines with file paths and line numbers. Up to 50 results.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "search_term": {
+            "type": "string",
+            "description": "The text to search for (exact substring match)."
+          },
+          "dir": {
+            "type": "string",
+            "description": "Subdirectory to search in. Default: workspace root."
+          }
+        },
+        "required": ["search_term"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_file",
+      "description": "Search for a text string within a specific file or the currently open file. Returns matching lines with line numbers.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "search_term": {
+            "type": "string",
+            "description": "The text to search for."
+          },
+          "file": {
+            "type": "string",
+            "description": "File to search. Default: currently open file."
+          }
+        },
+        "required": ["search_term"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "filemap",
+      "description": "Show the structure of a source file: function/class/method signatures with line numbers, bodies collapsed. Useful for understanding a file without reading every line. Works with Python, Rust, JavaScript, TypeScript, Go, and Java.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Relative path to the file."
+          }
+        },
+        "required": ["file_path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "submit",
+      "description": "Mark the current task as complete. Call this when you have finished all requested changes.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "allow_outside_workspace",
+      "description": "Enable or disable access to files outside the workspace directory. By default, all file operations are restricted to the workspace root. Call this tool with allow=true if the user asks you to access absolute paths or files outside the workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "allow": {
+            "type": "boolean",
+            "description": "true to enable, false to disable. Default: true."
+          }
+        }
+      }
+    }
+  }
+]
