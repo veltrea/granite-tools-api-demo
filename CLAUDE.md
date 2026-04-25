@@ -191,10 +191,12 @@ curl -s -X POST http://127.0.0.1:9999/api/send \
 
 期待される動作:
 1. LLM が `create({"filename": "hello.py"})` で空ファイル作成
-2. （モデルによっては）続けて `insert({"text": "print(\"Hello, World!\")"})` でコード挿入
+2. 続けて `insert({"text": "print(\"Hello, World!\")"})` でコード挿入
+3. 完了を報告
 
-> 注: granite-4-h-tiny は Tools API モードでは create と insert を 1 ターンで連結しないことがある。
-> その場合はもう一度「Use the insert tool to add `...` to hello.py」のように明示的に頼むと続けてくれる。
+> 注: 当初 granite-4-h-tiny は Tools API モードでは create で止まりがちだったが、
+> `prompts/system.txt` の "Writing content into files" セクション（create → insert の手順を明示）で
+> 5/5 で連鎖するようになった。挙動が崩れるようなら system.txt を確認すること。
 
 ### シナリオ 5: パスガードの動作確認
 
