@@ -94,6 +94,7 @@ pub fn dispatch(state: &RefCell<EditorState>, tool: &str, args: &Value) -> Strin
         "open" => tool_open(state, args),
         "goto" => tool_goto(state, args),
         "create" => tool_create(state, args),
+        "write" => tool_write(state, args),
         "scroll_up" => tool_scroll_up(state),
         "scroll_down" => tool_scroll_down(state),
         "find_file" => tool_find_file(state, args),
@@ -175,6 +176,33 @@ fn tool_create(state: &RefCell<EditorState>, args: &Value) -> Result<String, Str
     st.window_start = 0;
 
     Ok(format!("[File: {} (new file created)]\n(empty file)", filename))
+}
+
+fn tool_write(state: &RefCell<EditorState>, args: &Value) -> Result<String, String> {
+    let path = args.get("path").and_then(|v| v.as_str())
+        .ok_or("missing required parameter: path")?;
+    let content = args.get("content").and_then(|v| v.as_str())
+        .ok_or("missing required parameter: content")?;
+
+    let mut st = state.borrow_mut();
+    let full = st.resolve(path)?;
+
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create directory: {}", e))?;
+    }
+
+    let existed = full.exists();
+    fs::write(&full, content)
+        .map_err(|e| format!("Cannot write {}: {}", full.display(), e))?;
+
+    st.current_lines = content.lines().map(String::from).collect();
+    st.current_file = Some(path.to_string());
+    st.window_start = 0;
+
+    let action = if existed { "overwritten" } else { "new file written" };
+    let header = format!("[File: {} ({}, {} lines)]\n", path, action, st.current_lines.len());
+    Ok(header + &st.window_text())
 }
 
 fn tool_scroll_up(state: &RefCell<EditorState>) -> Result<String, String> {
@@ -552,6 +580,46 @@ mod tests {
         assert!(res.contains("hello.txt"), "open result: {}", res);
         assert!(res.contains("(empty file)") || res.contains("0 lines") || res.contains("(empty"),
             "新規ファイルは空: {}", res);
+    }
+
+    #[test]
+    fn test_write_creates_file_with_content() {
+        let (dir, state) = setup();
+
+        let res = dispatch(&state, "write", &serde_json::json!({
+            "path": "hello.py",
+            "content": "print(\"hi\")\nprint(\"bye\")\n"
+        }));
+        assert!(res.contains("new file written"), "write result: {}", res);
+        assert!(res.contains("2 lines"), "2行あるはず: {}", res);
+
+        // 中身が実際に書き込まれている
+        let actual = std::fs::read_to_string(dir.path().join("hello.py")).unwrap();
+        assert_eq!(actual, "print(\"hi\")\nprint(\"bye\")\n");
+    }
+
+    #[test]
+    fn test_write_overwrites_existing_file() {
+        let (dir, state) = setup();
+        std::fs::write(dir.path().join("a.txt"), "old content").unwrap();
+
+        let res = dispatch(&state, "write", &serde_json::json!({
+            "path": "a.txt",
+            "content": "new content"
+        }));
+        assert!(res.contains("overwritten"), "overwrite result: {}", res);
+        let actual = std::fs::read_to_string(dir.path().join("a.txt")).unwrap();
+        assert_eq!(actual, "new content");
+    }
+
+    #[test]
+    fn test_write_blocks_outside_workspace() {
+        let (_dir, state) = setup();
+        let res = dispatch(&state, "write", &serde_json::json!({
+            "path": "/etc/no-way",
+            "content": "x"
+        }));
+        assert!(res.contains("Access denied"), "should be blocked: {}", res);
     }
 
     #[test]

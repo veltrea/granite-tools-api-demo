@@ -62,8 +62,29 @@
   {
     "type": "function",
     "function": {
+      "name": "write",
+      "description": "Create or overwrite a file with the given content in a single call. Parent directories are created automatically. Use this to create a new file *with content* (preferred over `create` + `insert`). Also overwrites an existing file's contents in one shot.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative path for the file."
+          },
+          "content": {
+            "type": "string",
+            "description": "The full text to write into the file."
+          }
+        },
+        "required": ["path", "content"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "create",
-      "description": "Create a new empty file and open it in the editor. Parent directories are created automatically.",
+      "description": "Create a new EMPTY file and open it in the editor. Parent directories are created automatically. To create a file with content, prefer `write` over this.",
       "parameters": {
         "type": "object",
         "properties": {
