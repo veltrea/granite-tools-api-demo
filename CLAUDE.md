@@ -189,14 +189,11 @@ curl -s -X POST http://127.0.0.1:9999/api/send \
   -d '{"text": "Create a file called hello.py with a hello world program"}'
 ```
 
-期待される動作:
-1. LLM が `create({"filename": "hello.py"})` で空ファイル作成
-2. 続けて `insert({"text": "print(\"Hello, World!\")"})` でコード挿入
-3. 完了を報告
+期待される動作（モデルの選択次第）:
+- パス A（推奨・1 ステップ）: `write({"path": "hello.py", "content": "..."})` で 1 発書き込み
+- パス B（2 ステップ）: `create({"filename": "hello.py"})` → `write({"path": "hello.py", "content": "..."})`
 
-> 注: 当初 granite-4-h-tiny は Tools API モードでは create で止まりがちだったが、
-> `prompts/system.txt` の "Writing content into files" セクション（create → insert の手順を明示）で
-> 5/5 で連鎖するようになった。挙動が崩れるようなら system.txt を確認すること。
+どちらでも最終的に内容入りのファイルが作られる。`write(path, content)` は OpenCode の同名ツールに倣った設計で、内容付きでファイルを作るときの標準経路。`create` は本当に空ファイルを置きたい時用。
 
 ### シナリオ 5: パスガードの動作確認
 

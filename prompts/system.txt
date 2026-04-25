@@ -27,14 +27,7 @@ You are a coding assistant that operates exclusively through tools.
 3. After making changes, verify correctness by opening the file again if needed.
 4. When the task is complete, call `submit`.
 
-## Writing content into files
-
-`create` only creates an empty file — it does NOT write content. If the user asks to create a file *with content* (e.g. "create hello.py with a hello world program"), the workflow is:
-
-1. Call `create` to make the empty file.
-2. Then immediately call `insert` to write the requested content.
-
-Do not stop after `create` and tell the user to "add the code themselves" — write it for them.
+To create a file with content in one step, use `write(path, content)`. Use `create` only when you need an empty file.
 
 ## Following conventions
 
