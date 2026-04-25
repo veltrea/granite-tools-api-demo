@@ -1,9 +1,10 @@
-//! granite-native-protocol-demo — [TOOL_CALLS] プロトコルデモアプリ
+//! granite-tools-api-demo — OpenAI 互換 Tools API デモアプリ
 //!
-//! granite-4-h-tiny の [TOOL_CALLS] ネイティブプロトコルを
+//! granite-4-h-tiny の OpenAI 互換 Function Calling（Tools API）を
 //! 実際に動く形で提供するためのチャットクライアント。
 //!
 //! 設定は実行ファイルと同じディレクトリの config.json から読む。
+//! ツール定義は prompts/tools.json から JSON スキーマで読み込む。
 //! テスト API (ポート 9999) でチャット操作を外部から自動化できる。
 
 mod tools;
@@ -104,9 +105,9 @@ fn resolve_workdir(configured: &str) -> PathBuf {
 // --- プロンプト読み込み ---
 
 /// prompts/ ディレクトリからテキストファイルを読む。
-/// コメント行（# で始まる）を除去して返す。
+/// strip_comments=true なら # で始まるコメント行を除去する。
 /// ファイルが見つからなければ fallback を返す。
-fn load_prompt(name: &str, fallback: &str) -> String {
+fn load_prompt(name: &str, fallback: &str, strip_comments: bool) -> String {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -119,12 +120,14 @@ fn load_prompt(name: &str, fallback: &str) -> String {
     for path in candidates.iter().flatten() {
         if let Ok(text) = std::fs::read_to_string(path) {
             eprintln!("[prompt] loaded {} from {}", name, path.display());
-            // # で始まるコメント行を除去
-            let filtered: String = text.lines()
-                .filter(|line| !line.starts_with('#'))
-                .collect::<Vec<_>>()
-                .join("\n");
-            return filtered.trim().to_string();
+            if strip_comments {
+                let filtered: String = text.lines()
+                    .filter(|line| !line.starts_with('#'))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                return filtered.trim().to_string();
+            }
+            return text;
         }
     }
 
@@ -253,16 +256,29 @@ fn main() {
     eprintln!("[config] endpoint={} model={} workdir={}",
         config.endpoint, config.model, workdir.display());
 
-    let system_prompt = load_prompt("system.txt", "You are a helpful coding assistant.");
-    let tools_prompt = load_prompt("tools.txt", "");
+    let system_prompt = load_prompt("system.txt", "You are a helpful coding assistant.", true);
+    let tools_json = load_prompt("tools.json", "[]", false);
+
+    // tools.json をパースして妥当性を確認（壊れていたら空配列にフォールバック）
+    let tools_json_clean = match serde_json::from_str::<serde_json::Value>(&tools_json) {
+        Ok(v) => {
+            let count = v.as_array().map(|a| a.len()).unwrap_or(0);
+            eprintln!("[prompt] tools.json parsed ({} tools)", count);
+            v.to_string()
+        }
+        Err(e) => {
+            eprintln!("[prompt] tools.json parse error: {} — using empty tool list", e);
+            "[]".to_string()
+        }
+    };
 
     let html = HTML
         .replace("{{MARKED_JS}}", MARKED_JS)
         .replace("{{ENDPOINT}}", &config.endpoint)
         .replace("{{MODEL}}", &config.model)
         .replace("{{WORKDIR}}", &workdir.display().to_string())
-        .replace("{{SYSTEM_PROMPT}}", &system_prompt.replace('`', "\\`").replace("${", "\\${"))
-        .replace("{{TOOLS_PROMPT}}", &tools_prompt.replace('`', "\\`").replace("${", "\\${"));
+        .replace("{{SYSTEM_PROMPT}}", &system_prompt.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${"))
+        .replace("{{TOOLS_JSON}}", &tools_json_clean);
 
     let state = RefCell::new(tools::EditorState::new(workdir));
     let shared_state: SharedState = Arc::new(Mutex::new("[]".into()));
@@ -288,7 +304,7 @@ fn main() {
     menu.init_for_nsapp();
 
     let window = WindowBuilder::new()
-        .with_title("Chat Client — [TOOL_CALLS] Protocol Demo")
+        .with_title("Chat Client — Tools API Demo")
         .with_inner_size(tao::dpi::LogicalSize::new(900.0, 700.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(500.0, 400.0))
         .build(&event_loop)

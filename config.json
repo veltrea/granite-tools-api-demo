@@ -1,5 +1,5 @@
 {
   "endpoint": "http://localhost:1234",
   "model": "ibm/granite-4-h-tiny",
-  "workdir": "."
+  "workdir": "/Volumes/2TB_USB/dev/granite-tools-api-demo"
 }

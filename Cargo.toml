@@ -1,8 +1,8 @@
 [package]
-name = "granite-native-protocol-demo"
+name = "granite-tools-api-demo"
 version = "0.1.0"
 edition = "2021"
-description = "[TOOL_CALLS] protocol demo — granite-4-h-tiny native tool calling with SWE-agent compatible tools"
+description = "OpenAI-compatible Tools API demo — granite-4-h-tiny function calling with SWE-agent compatible tools"
 
 [dependencies]
 wry = "0.50"

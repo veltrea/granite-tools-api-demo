@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>[TOOL_CALLS] Protocol Demo</title>
+<title>Tools API Demo</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-user-select: text; user-select: text; }
 :root { --bg: #1e1e1e; --panel: #252526; --border: #3c3c3c; --text: #ccc; --dim: #888; --green: #4ec9b0; --blue: #569cd6; --yellow: #dcdcaa; --red: #f44747; --mono: 'Cascadia Code','Fira Code','SF Mono',Consolas,monospace; }
@@ -90,7 +90,15 @@ const $msgs=$('messages'),$input=$('input'),$status=$('status'),$sendBtn=$('send
 const ENDPOINT = '{{ENDPOINT}}';
 const MODEL = '{{MODEL}}';
 
+// Rust 側が prompts/system.txt を埋め込む
+const SYSTEM_PROMPT = `{{SYSTEM_PROMPT}}`;
+
+// Rust 側が prompts/tools.json をパース済み JSON 文字列として埋め込む
+const TOOLS = {{TOOLS_JSON}};
+
 let history=[],generating=false,abortCtrl=null;
+
+const MAX_TOOL_LOOPS = 10;
 
 // パスガード状態の表示
 let pathGuardLocked = true;
@@ -108,21 +116,11 @@ function updatePathGuard(locked) {
 }
 updatePathGuard(true);
 
-// プロンプトは prompts/ ディレクトリの外部ファイルから Rust 側が注入する
-const TOOL_SYSTEM_PROMPT = `{{SYSTEM_PROMPT}}
-
-## Tools
-
-{{TOOLS_PROMPT}}`;
-
-const MAX_TOOL_LOOPS = 10;
-
 // marked.js 設定
 if (typeof marked !== 'undefined') {
   marked.setOptions({ breaks: true, gfm: true });
 }
 
-// マークダウンを安全に HTML に変換（XSS 対策: script タグ等を除去）
 function renderMarkdown(text) {
   if (typeof marked === 'undefined') return escapeHtml(text);
   try {
@@ -145,7 +143,6 @@ function addMsg(role,text){
   const d=document.createElement('div');
   d.className='msg '+role;
   if (role === 'assistant') {
-    // ストリーミング中はプレーンテキスト、完了後に renderMarkdown で差し替える
     d.classList.add('streaming');
     d.textContent=text||'';
   } else {
@@ -156,11 +153,9 @@ function addMsg(role,text){
   return d;
 }
 
-// アシスタントメッセージをマークダウンレンダリングに切り替える
 function renderAssistantMsg(div, text) {
   div.classList.remove('streaming');
   div.classList.add('rendered');
-  // meta 要素があれば保持
   const metaEl = div.querySelector('.meta');
   div.innerHTML = renderMarkdown(text);
   if (metaEl) div.appendChild(metaEl);
@@ -192,92 +187,6 @@ function addToolResultMsg(result) {
   $msgs.scrollTop = $msgs.scrollHeight;
 }
 
-// --- [TOOL_CALLS] パーサー (統合版) ---
-// 位置情報付きでパースし、parseToolCalls / stripToolCalls / ストリーミング表示の全てで使う。
-
-// ブレースマッチングで JSON オブジェクトの終端位置を返す (見つからなければ -1)
-function findJsonEnd(str) {
-  let depth = 0, inStr = false, esc = false;
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
-    if (ch === '"') inStr = true;
-    else if (ch === '{') depth++;
-    else if (ch === '}') { depth--; if (depth === 0) return i + 1; }
-  }
-  return -1; // JSON が閉じていない（ストリーミング途中）
-}
-
-// テキスト中の [TOOL_CALLS] ブロックを全て検出。
-// 各要素: { name, arguments, blockStart, blockEnd }
-// incomplete: true → 最後のブロックがまだ閉じていない（ストリーミング途中）
-function parseToolCallsWithRanges(text) {
-  const results = [];
-  const re = /\[TOOL_CALLS\]\s*(\w+)\s*:?\s*/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const toolName = m[1];
-    const afterMatch = m.index + m[0].length;
-    const rest = text.substring(afterMatch);
-    const jsonStart = rest.indexOf('{');
-
-    if (jsonStart === -1) {
-      // JSON が始まっていない — ストリーミング途中の可能性大
-      results.push({ name: toolName, arguments: {}, blockStart: m.index, blockEnd: -1, incomplete: true });
-      continue;
-    }
-
-    const jsonStr = rest.substring(jsonStart);
-    const jsonEnd = findJsonEnd(jsonStr);
-
-    if (jsonEnd === -1) {
-      // JSON が閉じていない — ストリーミング途中
-      results.push({ name: toolName, arguments: {}, blockStart: m.index, blockEnd: -1, incomplete: true });
-      continue;
-    }
-
-    let args = {};
-    try { args = JSON.parse(jsonStr.substring(0, jsonEnd)); } catch {}
-
-    let blockEnd = afterMatch + jsonStart + jsonEnd;
-    // 閉じタグ [/TOOL_CALLS] があれば含める
-    const afterJson = text.substring(blockEnd);
-    const closeMatch = afterJson.match(/^\s*\[\/TOOL_CALLS\]/);
-    if (closeMatch) blockEnd += closeMatch[0].length;
-
-    results.push({ name: toolName, arguments: args, blockStart: m.index, blockEnd, incomplete: false });
-  }
-  return results;
-}
-
-// 完了済みのツール呼び出しだけ返す（ストリーミング完了後に使う）
-function parseToolCalls(text) {
-  return parseToolCallsWithRanges(text)
-    .filter(tc => !tc.incomplete)
-    .map(tc => ({ name: tc.name, arguments: tc.arguments }));
-}
-
-// ツール呼び出しブロックを除去した表示用テキストを返す
-function stripToolCalls(text) {
-  const ranges = parseToolCallsWithRanges(text)
-    .filter(tc => !tc.incomplete && tc.blockEnd > 0)
-    .map(tc => [tc.blockStart, tc.blockEnd]);
-  let result = text;
-  for (let i = ranges.length - 1; i >= 0; i--) {
-    result = result.substring(0, ranges[i][0]) + result.substring(ranges[i][1]);
-  }
-  return result.trim();
-}
-
-// ストリーミング中の表示用: [TOOL_CALLS] の開始位置以降を隠す
-// 返り値: ユーザーに見せるべきテキスト（タグ以前の部分のみ）
-function getDisplayTextDuringStream(text) {
-  const idx = text.indexOf('[TOOL_CALLS]');
-  if (idx === -1) return text;
-  // タグより前のテキストだけ返す
-  return text.substring(0, idx).trimEnd();
-}
-
 async function executeTool(toolName, args) {
   console.log('[tool] executing:', toolName, JSON.stringify(args));
   try {
@@ -301,49 +210,89 @@ function clearChat(){
   setStatus('Ready','var(--dim)');
 }
 
+// SSE ストリーミングで届く tool_calls の差分をマージする。
+// OpenAI Tools API では一つの tool_call が複数 delta に分割されて届く:
+//   delta.tool_calls[].index           — どの呼び出しに対応するか
+//   delta.tool_calls[].id              — 最初のチャンクのみ
+//   delta.tool_calls[].function.name   — 最初のチャンクのみ
+//   delta.tool_calls[].function.arguments — JSON 文字列が断片で届く
+function mergeToolCallDelta(buffer, deltaCalls) {
+  for (const dc of deltaCalls) {
+    const idx = dc.index ?? 0;
+    if (!buffer[idx]) {
+      buffer[idx] = { id: '', type: 'function', function: { name: '', arguments: '' } };
+    }
+    if (dc.id) buffer[idx].id = dc.id;
+    if (dc.type) buffer[idx].type = dc.type;
+    if (dc.function) {
+      if (dc.function.name) buffer[idx].function.name += dc.function.name;
+      if (dc.function.arguments) buffer[idx].function.arguments += dc.function.arguments;
+    }
+  }
+}
+
+// 1 ターンぶんの SSE ストリームを読み取って、テキスト + tool_calls を組み立てる
 async function streamChat() {
-  const msgs = [{ role: 'system', content: TOOL_SYSTEM_PROMPT }];
-  for (const m of history) msgs.push({ role: m.role, content: m.content });
+  const msgs = [{ role: 'system', content: SYSTEM_PROMPT }];
+  for (const m of history) msgs.push(m);
 
   const msgDiv = addMsg('assistant', '');
   let fullText = '', tokenCount = 0, firstTokenAt = null;
+  let toolCallsBuf = [];
+  let finishReason = null;
   const startTime = Date.now();
   abortCtrl = new AbortController();
 
   const res = await fetch(ENDPOINT + '/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, messages: msgs, max_tokens: 2048, stream: true }),
+    body: JSON.stringify({
+      model: MODEL,
+      messages: msgs,
+      max_tokens: 2048,
+      stream: true,
+      tools: TOOLS,
+      tool_choice: 'auto'
+    }),
     signal: abortCtrl.signal
   });
   if (!res.ok) throw new Error(res.status + ': ' + await res.text());
 
   let toolDetected = false;
   const reader = res.body.getReader(), decoder = new TextDecoder();
+  let sseBuf = '';
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    for (const line of decoder.decode(value, { stream: true }).split('\n')) {
+    sseBuf += decoder.decode(value, { stream: true });
+    // SSE は `\n\n` で 1 イベント区切り、各行は `data: ...`
+    let nl;
+    while ((nl = sseBuf.indexOf('\n')) !== -1) {
+      const line = sseBuf.slice(0, nl);
+      sseBuf = sseBuf.slice(nl + 1);
       if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
+      const data = line.slice(6).trim();
       if (data === '[DONE]') continue;
-      try {
-        const c = JSON.parse(data).choices?.[0]?.delta?.content;
-        if (c) {
-          if (!firstTokenAt) firstTokenAt = Date.now();
-          tokenCount++; fullText += c;
-          // [TOOL_CALLS] が現れたらタグ以前のテキストだけ表示し、
-          // ツール呼び出し部分はプレースホルダーに差し替える
-          const displayText = getDisplayTextDuringStream(fullText);
-          if (fullText.includes('[TOOL_CALLS]')) {
-            if (!toolDetected) { toolDetected = true; setStatus('Tool call detected...', 'var(--yellow)'); }
-            msgDiv.textContent = displayText ? displayText + '\n\n🔧 Calling tool...' : '🔧 Calling tool...';
-          } else {
-            msgDiv.textContent = fullText;
-          }
-          $msgs.scrollTop = $msgs.scrollHeight;
-        }
-      } catch {}
+      let parsed;
+      try { parsed = JSON.parse(data); } catch { continue; }
+      const choice = parsed.choices?.[0];
+      if (!choice) continue;
+      const delta = choice.delta || {};
+      if (delta.content) {
+        if (!firstTokenAt) firstTokenAt = Date.now();
+        tokenCount++;
+        fullText += delta.content;
+        msgDiv.textContent = fullText;
+        $msgs.scrollTop = $msgs.scrollHeight;
+      }
+      if (delta.tool_calls) {
+        if (!toolDetected) { toolDetected = true; setStatus('Tool call detected...', 'var(--yellow)'); }
+        if (!firstTokenAt) firstTokenAt = Date.now();
+        tokenCount++;
+        mergeToolCallDelta(toolCallsBuf, delta.tool_calls);
+        msgDiv.textContent = fullText ? fullText + '\n\n🔧 Calling tool...' : '🔧 Calling tool...';
+      }
+      if (choice.finish_reason) finishReason = choice.finish_reason;
     }
   }
 
@@ -357,7 +306,10 @@ async function streamChat() {
   msgDiv.appendChild(meta);
   setStatus(tps + ' t/s', 'var(--green)');
 
-  return { fullText, msgDiv };
+  // 完了したツール呼び出しを抽出（id を持つもののみ）
+  const toolCalls = toolCallsBuf.filter(tc => tc && tc.function && tc.function.name);
+
+  return { fullText, toolCalls, finishReason, msgDiv };
 }
 
 async function send(){
@@ -375,41 +327,54 @@ async function send(){
   try {
     let loopCount = 0;
     while (loopCount < MAX_TOOL_LOOPS) {
-      const { fullText, msgDiv } = await streamChat();
-      history.push({ role: 'assistant', content: fullText });
+      const { fullText, toolCalls, msgDiv } = await streamChat();
 
-      const toolCalls = parseToolCalls(fullText);
+      // assistant メッセージを履歴に追加
+      const assistantMsg = { role: 'assistant', content: fullText || '' };
+      if (toolCalls.length > 0) assistantMsg.tool_calls = toolCalls;
+      history.push(assistantMsg);
+
       if (toolCalls.length === 0) {
         // ツール呼び出しなし = 最終応答 → マークダウンレンダリング
         renderAssistantMsg(msgDiv, fullText);
         break;
       }
 
-      // ツール呼び出しあり → ツール部分を除去して残りをレンダリング
-      const cleanText = stripToolCalls(fullText);
-      if (cleanText) {
-        renderAssistantMsg(msgDiv, cleanText);
+      // テキストがあれば残す、なければ吹き出しごと消す
+      if (fullText.trim()) {
+        renderAssistantMsg(msgDiv, fullText);
       } else {
-        // テキストが空（ツール呼び出しのみ）なら吹き出しごと消す
         msgDiv.remove();
       }
 
-      let toolResults = [];
+      // 各ツール呼び出しを順に実行し、role: "tool" メッセージで結果を返す
       for (const tc of toolCalls) {
-        addToolCallMsg(tc.name, tc.arguments);
-        setStatus('Executing ' + tc.name + '...', 'var(--yellow)');
-        const result = await executeTool(tc.name, tc.arguments);
+        const fnName = tc.function.name;
+        let fnArgs = {};
+        try {
+          fnArgs = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
+        } catch (e) {
+          console.warn('[tool] arguments JSON parse failed:', tc.function.arguments, e);
+        }
+
+        addToolCallMsg(fnName, fnArgs);
+        setStatus('Executing ' + fnName + '...', 'var(--yellow)');
+        const result = await executeTool(fnName, fnArgs);
         addToolResultMsg(result);
-        toolResults.push('[TOOL_RESULT name="' + tc.name + '"]\n' + result + '\n[/TOOL_RESULT]');
+
+        history.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: result
+        });
 
         // パスガードの状態変更を検出
-        if (tc.name === 'allow_outside_workspace') {
+        if (fnName === 'allow_outside_workspace') {
           if (result.includes('enabled')) updatePathGuard(false);
           else if (result.includes('restricted')) updatePathGuard(true);
         }
       }
 
-      history.push({ role: 'user', content: toolResults.join('\n') });
       setStatus('Tool result → LLM...', 'var(--yellow)');
       loopCount++;
     }
@@ -426,14 +391,12 @@ async function send(){
 
 // --- テスト API (Rust 側の evaluate_script から呼ばれる) ---
 
-// メッセージを送信
 function __testSend(text) {
   if (generating) return;
   $input.value = text;
   send();
 }
 
-// 現在の状態を IPC 経由で Rust に送る
 function __testReportState() {
   if (window.ipc) {
     window.ipc.postMessage(JSON.stringify({
